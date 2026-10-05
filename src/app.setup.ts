@@ -13,11 +13,7 @@ export function configureApp(app: INestApplication): void {
   const corsOrigins = config.get('CORS_ORIGINS', { infer: true });
 
   app.use(helmet());
-  app.enableCors({
-    origin: corsOrigins.length > 0 ? corsOrigins : false,
-    // Required for the refresh-token cookie sent by web clients.
-    credentials: true,
-  });
+  app.enableCors({ origin: corsOrigins.length > 0 ? corsOrigins : false });
   app.setGlobalPrefix('api');
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
   app.enableShutdownHooks();

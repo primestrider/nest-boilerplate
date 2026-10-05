@@ -36,11 +36,38 @@ describe('AppController (e2e)', () => {
       path: '/api/v1/does-not-exist',
     });
     expect(res.body.timestamp).toEqual(expect.any(String));
+    expect(res.body.requestId).toBe(res.headers['x-request-id']);
   });
 
   it('sets security headers', async () => {
     const res = await request(app.getHttpServer()).get('/api/v1');
     expect(res.headers['x-content-type-options']).toBe('nosniff');
+  });
+
+  it('reuses a valid incoming request id and replaces an unsafe one', async () => {
+    const server = app.getHttpServer();
+
+    const kept = await request(server)
+      .get('/api/v1')
+      .set('x-request-id', 'upstream-123');
+    expect(kept.headers['x-request-id']).toBe('upstream-123');
+
+    const replaced = await request(server)
+      .get('/api/v1')
+      .set('x-request-id', 'bad id with spaces');
+    expect(replaced.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it('/api/health (GET)', () => {
+    return request(app.getHttpServer())
+      .get('/api/health')
+      .expect(200)
+      .expect((res) =>
+        expect(res.body).toMatchObject({
+          status: 'ok',
+          info: { database: { status: 'up' } },
+        }),
+      );
   });
 
   afterEach(async () => {

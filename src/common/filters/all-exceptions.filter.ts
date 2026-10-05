@@ -13,6 +13,7 @@ export interface ErrorResponse {
   error: string;
   message: string | string[];
   path: string;
+  requestId?: string;
   timestamp: string;
 }
 
@@ -25,6 +26,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost): void {
     const { httpAdapter } = this.httpAdapterHost;
     const ctx = host.switchToHttp();
+    // Set by pino-http; lets clients quote an id that matches the server logs.
+    const request = ctx.getRequest<{ id?: string | number }>();
 
     const statusCode =
       exception instanceof HttpException
@@ -42,7 +45,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const body: ErrorResponse = {
       statusCode,
       ...describe(exception),
-      path: httpAdapter.getRequestUrl(ctx.getRequest()),
+      path: httpAdapter.getRequestUrl(request),
+      requestId: request.id === undefined ? undefined : String(request.id),
       timestamp: new Date().toISOString(),
     };
 
