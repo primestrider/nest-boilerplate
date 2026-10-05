@@ -13,6 +13,7 @@ describe('validateEnv', () => {
       PORT: 3000,
       CORS_ORIGINS: [],
       SWAGGER_ENABLED: true,
+      TRUST_PROXY: 0,
       LOG_LEVEL: 'info',
       JWT_ACCESS_TTL: 15 * 60 * 1000,
       JWT_REFRESH_TTL: 30 * 24 * 60 * 60 * 1000,
@@ -50,6 +51,28 @@ describe('validateEnv', () => {
         DATABASE_URL: 'postgres://u:p@localhost/app',
       }),
     ).toThrow(/DATABASE_URL/);
+  });
+
+  it('disables Swagger by default in production only', () => {
+    expect(
+      validateEnv({ ...required, NODE_ENV: 'production' }).SWAGGER_ENABLED,
+    ).toBe(false);
+    expect(
+      validateEnv({
+        ...required,
+        NODE_ENV: 'production',
+        SWAGGER_ENABLED: 'true',
+      }).SWAGGER_ENABLED,
+    ).toBe(true);
+  });
+
+  it('treats empty variables as unset', () => {
+    const env = validateEnv({ ...required, SWAGGER_ENABLED: '', PORT: '' });
+    expect(env.SWAGGER_ENABLED).toBe(true);
+    expect(env.PORT).toBe(3000);
+    expect(() => validateEnv({ ...required, JWT_ACCESS_SECRET: '' })).toThrow(
+      /JWT_ACCESS_SECRET/,
+    );
   });
 
   it('requires a strong JWT secret', () => {

@@ -1,19 +1,18 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
-import { App } from 'supertest/types.js';
 import { AppModule } from './../src/app.module.js';
 import { configureApp } from './../src/app.setup.js';
 
 describe('AppController (e2e)', () => {
-  let app: INestApplication<App>;
+  let app: NestExpressApplication;
 
   beforeEach(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
 
-    app = moduleFixture.createNestApplication();
+    app = moduleFixture.createNestApplication<NestExpressApplication>();
     configureApp(app);
     await app.init();
   });
@@ -25,18 +24,22 @@ describe('AppController (e2e)', () => {
       .expect('Hello World!');
   });
 
-  it('returns the standard error shape for unknown routes', async () => {
+  it('renders errors as RFC 9457 problem details', async () => {
     const res = await request(app.getHttpServer())
-      .get('/api/v1/does-not-exist')
-      .expect(404);
+      .get('/api/v1/does-not-exist?token=secret')
+      .expect(404)
+      .expect('Content-Type', /^application\/problem\+json/);
 
-    expect(res.body).toMatchObject({
-      statusCode: 404,
-      error: 'Not Found',
-      path: '/api/v1/does-not-exist',
+    expect(res.body).toEqual({
+      type: 'about:blank',
+      title: 'Not Found',
+      status: 404,
+      detail: 'Cannot GET /api/v1/does-not-exist?token=secret',
+      code: 'NOT_FOUND',
+      // Query string stripped: it can carry secrets.
+      instance: '/api/v1/does-not-exist',
+      requestId: res.headers['x-request-id'],
     });
-    expect(res.body.timestamp).toEqual(expect.any(String));
-    expect(res.body.requestId).toBe(res.headers['x-request-id']);
   });
 
   it('sets security headers', async () => {
@@ -58,9 +61,18 @@ describe('AppController (e2e)', () => {
     expect(replaced.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/);
   });
 
-  it('/api/health (GET)', () => {
+  it('/api/health/live (GET) checks no dependencies', () => {
     return request(app.getHttpServer())
-      .get('/api/health')
+      .get('/api/health/live')
+      .expect(200)
+      .expect((res) =>
+        expect(res.body).toMatchObject({ status: 'ok', info: {} }),
+      );
+  });
+
+  it('/api/health/ready (GET) checks the database', () => {
+    return request(app.getHttpServer())
+      .get('/api/health/ready')
       .expect(200)
       .expect((res) =>
         expect(res.body).toMatchObject({
@@ -68,6 +80,38 @@ describe('AppController (e2e)', () => {
           info: { database: { status: 'up' } },
         }),
       );
+  });
+
+  it('answers an oversized body with 413, not 500', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .send({ email: 'a@b.co', password: 'x'.repeat(200_000) })
+      .expect(413);
+
+    expect(res.body).toMatchObject({
+      status: 413,
+      title: 'Payload Too Large',
+      code: 'PAYLOAD_TOO_LARGE',
+      requestId: res.headers['x-request-id'],
+    });
+  });
+
+  it('answers malformed JSON with 400 and a request id', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .set('Content-Type', 'application/json')
+      .send('{"email": bad')
+      .expect(400);
+
+    expect(res.body).toMatchObject({
+      code: 'BAD_REQUEST',
+      requestId: res.headers['x-request-id'],
+    });
+  });
+
+  it('trusts the configured number of proxies', () => {
+    // TRUST_PROXY=1 in the e2e env: req.ip comes from X-Forwarded-For.
+    expect(app.getHttpAdapter().getInstance().get('trust proxy')).toBe(1);
   });
 
   afterEach(async () => {

@@ -8,9 +8,19 @@ export const DRIZZLE = Symbol('DRIZZLE');
 
 export const MIGRATIONS_FOLDER = 'drizzle';
 
+// mysql2 queues requests for a free connection without limit by default, so
+// a slow or unreachable database lets waiting requests pile up in memory.
+// Applied via the URL so DATABASE_URL query params can still override it.
+const POOL_DEFAULTS = { queueLimit: '100' };
+
 export function createDatabase(url: string) {
+  const uri = new URL(url);
+  for (const [key, value] of Object.entries(POOL_DEFAULTS)) {
+    if (!uri.searchParams.has(key)) uri.searchParams.set(key, value);
+  }
+
   const pool = createPool({
-    uri: url,
+    uri: uri.toString(),
     // Read and write DATETIME values as UTC regardless of the host timezone.
     timezone: 'Z',
   });

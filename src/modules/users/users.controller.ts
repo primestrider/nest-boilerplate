@@ -1,5 +1,6 @@
-import { Controller, Get, NotFoundException, Query } from '@nestjs/common';
+import { Controller, Get, HttpStatus, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { AppException } from '../../common/errors/app.exception.js';
 import { PaginationQueryDto } from '../../common/dto/pagination.dto.js';
 import type { AuthUser } from '../auth/auth-user.js';
 import { CurrentUser, Roles } from '../auth/decorators.js';
@@ -16,7 +17,13 @@ export class UsersController {
   async me(@CurrentUser() current: AuthUser): Promise<UserResponseDto> {
     const user = await this.users.findById(current.id);
     // The token can outlive a deleted account.
-    if (!user) throw new NotFoundException('User not found');
+    if (!user) {
+      throw new AppException(
+        HttpStatus.NOT_FOUND,
+        'USER_NOT_FOUND',
+        'User not found',
+      );
+    }
     return UserResponseDto.from(user);
   }
 

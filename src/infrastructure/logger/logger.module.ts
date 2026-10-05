@@ -1,25 +1,8 @@
-import { randomUUID } from 'node:crypto';
-import { IncomingMessage, ServerResponse } from 'node:http';
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { LoggerModule as PinoLoggerModule } from 'nestjs-pino';
+import { assignRequestId } from '../../common/middleware/request-id.js';
 import { Env } from '../../config/env.js';
-
-export const REQUEST_ID_HEADER = 'x-request-id';
-
-// Accept an upstream id (gateway/load balancer) only if it is short and
-// plain, so clients cannot inject arbitrary content into logs.
-const VALID_REQUEST_ID = /^[\w-]{1,128}$/;
-
-function resolveRequestId(req: IncomingMessage, res: ServerResponse): string {
-  const incoming = req.headers[REQUEST_ID_HEADER];
-  const id =
-    typeof incoming === 'string' && VALID_REQUEST_ID.test(incoming)
-      ? incoming
-      : randomUUID();
-  res.setHeader(REQUEST_ID_HEADER, id);
-  return id;
-}
 
 @Module({
   imports: [
@@ -32,7 +15,10 @@ function resolveRequestId(req: IncomingMessage, res: ServerResponse): string {
         return {
           pinoHttp: {
             level: config.get('LOG_LEVEL', { infer: true }),
-            genReqId: resolveRequestId,
+            genReqId: assignRequestId,
+            // Client IP as resolved by Express (honours TRUST_PROXY), unlike
+            // `remoteAddress`, which is the immediate peer (e.g. the proxy).
+            customProps: (req) => ({ ip: (req as { ip?: string }).ip }),
             customLogLevel: (_req, res, err) => {
               if (err || res.statusCode >= 500) return 'error';
               if (res.statusCode >= 400) return 'warn';

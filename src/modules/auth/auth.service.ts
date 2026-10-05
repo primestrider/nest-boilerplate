@@ -1,14 +1,11 @@
 import { createHash, randomBytes } from 'node:crypto';
-import {
-  ConflictException,
-  Injectable,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { HttpStatus, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Transactional, TransactionHost } from '@nestjs-cls/transactional';
 import * as argon2 from 'argon2';
 import { v7 as uuidv7 } from 'uuid';
+import { AppException } from '../../common/errors/app.exception.js';
 import type { Env } from '../../config/env.js';
 import {
   isUniqueViolation,
@@ -22,6 +19,13 @@ import { RefreshTokensRepository } from './refresh-tokens.repository.js';
 
 const hashToken = (token: string) =>
   createHash('sha256').update(token).digest('hex');
+
+const invalidRefreshToken = () =>
+  new AppException(
+    HttpStatus.UNAUTHORIZED,
+    'INVALID_REFRESH_TOKEN',
+    'Invalid refresh token',
+  );
 
 @Injectable()
 export class AuthService {
@@ -50,7 +54,11 @@ export class AuthService {
       return await this.issueTokens(user, uuidv7());
     } catch (error) {
       if (isUniqueViolation(error)) {
-        throw new ConflictException('Email is already registered');
+        throw new AppException(
+          HttpStatus.CONFLICT,
+          'EMAIL_ALREADY_REGISTERED',
+          'Email is already registered',
+        );
       }
       throw error;
     }
@@ -63,7 +71,11 @@ export class AuthService {
     const hash = user?.passwordHash ?? (await this.getDummyPasswordHash());
     const valid = await argon2.verify(hash, dto.password);
     if (!user || !valid) {
-      throw new UnauthorizedException('Invalid email or password');
+      throw new AppException(
+        HttpStatus.UNAUTHORIZED,
+        'INVALID_CREDENTIALS',
+        'Invalid email or password',
+      );
     }
     return this.issueTokens(user, uuidv7());
   }
@@ -75,7 +87,7 @@ export class AuthService {
   async refresh(refreshToken: string): Promise<AuthTokensDto> {
     const record = await this.refreshTokens.findByHash(hashToken(refreshToken));
     if (!record || (!record.revokedAt && record.expiresAt <= new Date())) {
-      throw new UnauthorizedException('Invalid refresh token');
+      throw invalidRefreshToken();
     }
 
     const tokens = record.revokedAt
@@ -88,7 +100,7 @@ export class AuthService {
 
     if (!tokens) {
       await this.refreshTokens.revokeFamily(record.familyId);
-      throw new UnauthorizedException('Invalid refresh token');
+      throw invalidRefreshToken();
     }
     return tokens;
   }

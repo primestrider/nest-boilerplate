@@ -1,9 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { eq } from 'drizzle-orm';
 import request from 'supertest';
-import { App } from 'supertest/types.js';
 import { AppModule } from './../src/app.module.js';
 import { configureApp } from './../src/app.setup.js';
 import {
@@ -13,7 +12,7 @@ import {
 import { users } from './../src/infrastructure/database/schema/index.js';
 
 describe('Auth (e2e)', () => {
-  let app: INestApplication<App>;
+  let app: NestExpressApplication;
   let db: Database;
   const password = 'correct-horse-battery';
 
@@ -22,7 +21,7 @@ describe('Auth (e2e)', () => {
       imports: [AppModule],
     }).compile();
 
-    app = moduleFixture.createNestApplication();
+    app = moduleFixture.createNestApplication<NestExpressApplication>();
     configureApp(app);
     await app.init();
     db = app.get(DRIZZLE);
@@ -54,7 +53,10 @@ describe('Auth (e2e)', () => {
       await api()
         .post('/api/v1/auth/register')
         .send({ email: `  ${email.toUpperCase()} `, password })
-        .expect(409);
+        .expect(409)
+        .expect(({ body }) =>
+          expect(body.code).toBe('EMAIL_ALREADY_REGISTERED'),
+        );
     });
 
     it('validates input', async () => {
@@ -62,10 +64,28 @@ describe('Auth (e2e)', () => {
         .post('/api/v1/auth/register')
         .send({ email: 'not-an-email', password: 'short', extra: true })
         .expect(400);
-      expect(body.message).toEqual(
+      expect(body).toMatchObject({
+        status: 400,
+        code: 'VALIDATION_FAILED',
+        detail: 'Validation failed',
+      });
+      expect(body.errors).toEqual(
         expect.arrayContaining([
-          'property extra should not exist',
-          'email must be an email',
+          {
+            field: 'extra',
+            code: 'whitelistValidation',
+            message: 'property extra should not exist',
+          },
+          {
+            field: 'email',
+            code: 'isEmail',
+            message: 'email must be an email',
+          },
+          {
+            field: 'password',
+            code: 'minLength',
+            message: 'password must be longer than or equal to 8 characters',
+          },
         ]),
       );
     });
@@ -92,7 +112,9 @@ describe('Auth (e2e)', () => {
         .post('/api/v1/auth/login')
         .send({ email: newEmail(), password })
         .expect(401);
-      expect(wrongPassword.body.message).toBe(unknownEmail.body.message);
+      expect(wrongPassword.body).toMatchObject({ code: 'INVALID_CREDENTIALS' });
+      expect(unknownEmail.body.code).toBe('INVALID_CREDENTIALS');
+      expect(wrongPassword.body.detail).toBe(unknownEmail.body.detail);
     });
   });
 
@@ -181,11 +203,14 @@ describe('Auth (e2e)', () => {
         refresh(body.refreshToken),
         refresh(body.refreshToken),
       ]);
-      expect(results.map((r) => r.status).sort((a, b) => a - b)).toEqual([200, 401]);
+      expect(results.map((r) => r.status).sort((a, b) => a - b)).toEqual([
+        200, 401,
+      ]);
     });
 
     it('rejects unknown tokens', async () => {
-      await refresh('unknown-token').expect(401);
+      const { body } = await refresh('unknown-token').expect(401);
+      expect(body.code).toBe('INVALID_REFRESH_TOKEN');
     });
   });
 

@@ -10,6 +10,7 @@ export default defineConfig({
     env: {
       NODE_ENV: 'test',
       LOG_LEVEL: 'silent',
+      TRUST_PROXY: '1',
       JWT_ACCESS_SECRET: 'e2e-test-secret-that-is-at-least-32-chars',
     },
     globalSetup: ['./test/global-setup.ts'],
